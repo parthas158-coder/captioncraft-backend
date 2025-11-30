@@ -1,76 +1,55 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import OpenAI from "openai";
-
-dotenv.config();
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 app.post("/generate", async (req, res) => {
   try {
     const { topic, tone, styles } = req.body;
 
     if (!topic || !tone || !styles) {
-      return res.status(400).json({ error: "Missing fields" });
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
     const prompt = `
-Your job is to return ONLY valid JSON.
-No hashtags outside the JSON.
-No markdown.
-No commentary.
+    You are an AI caption generator.
+    Create Instagram captions in JSON ONLY. NO text outside JSON.
 
-Return an array of objects like this:
+    Topic: "${topic}"
+    Base tone: "${tone}"
+    Styles: ${styles.join(", ")}
 
-[
-  {
-    "variant": "Friendly",
-    "short": "...",
-    "medium": "...",
-    "long": "...",
-    "hashtags": ["#tag1", "#tag2"]
-  }
-]
-
-Now generate captions for topic: "${topic}"
-Base tone: "${tone}"
-Styles: ${styles.join(", ")}
-`;
-
-    // --- CALL OPENAI ---
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.6,
-      messages: [
-        { role: "system", content: "You generate JSON only." },
-        { role: "user", content: prompt }
-      ]
-    });
-
-    const aiText = completion.choices[0].message.content.trim();
-
-    let parsed;
-    try {
-      parsed = JSON.parse(aiText);
-    } catch (e) {
-      console.log("AI returned invalid JSON:", aiText);
-      return res.status(500).json({ error: "AI returned invalid JSON", raw: aiText });
+    For each style return an object:
+    {
+      "variant": "Friendly",
+      "short": "...",
+      "medium": "...",
+      "long": "...",
+      "hashtags": ["#...", "#...", ...]
     }
 
-    res.json({ success: true, captions: parsed });
+    Respond ONLY with valid JSON array.
+    `;
 
-  } catch (err) {
-    console.error("SERVER ERROR:", err);
-    res.status(500).json({ error: "Internal server error" });
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+    });
+
+    const aiText = completion.choices[0].message.content;
+
+    // Try to parse JSON
+    let jsonOutput;
+    try {
+      jsonOutput = JSON.parse(aiText);
+    } catch (err) {
+      console.error("AI JSON parse error:", err, "Raw output:", aiText);
+      return res.status(500).json({
+        error: "AI returned invalid JSON",
+        raw: aiText,
+      });
+    }
+
+    res.json({ success: true, captions: jsonOutput });
+
+  } catch (error) {
+    console.error("SERVER ERROR:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
