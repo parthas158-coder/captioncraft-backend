@@ -1,3 +1,18 @@
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import OpenAI from "openai";
+
+dotenv.config();
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 app.post("/generate", async (req, res) => {
   try {
     const { topic, tone, styles } = req.body;
@@ -7,41 +22,55 @@ app.post("/generate", async (req, res) => {
     }
 
     const prompt = `
-You are CaptionCraft AI. ALWAYS return VALID JSON and NOTHING ELSE.
+Your job is to return ONLY valid JSON.
+No hashtags outside the JSON.
+No markdown.
+No commentary.
 
-Create captions for:
-Topic: "${topic}"
-Tone: "${tone}"
-Styles: ${styles.join(", ")}
-
-Return ONLY this JSON format:
+Return an array of objects like this:
 
 [
   {
     "variant": "Friendly",
-    "short": "text",
-    "medium": "text",
-    "long": "text",
+    "short": "...",
+    "medium": "...",
+    "long": "...",
     "hashtags": ["#tag1", "#tag2"]
   }
 ]
+
+Now generate captions for topic: "${topic}"
+Base tone: "${tone}"
+Styles: ${styles.join(", ")}
 `;
 
+    // --- CALL OPENAI ---
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
+      temperature: 0.6,
       messages: [
+        { role: "system", content: "You generate JSON only." },
         { role: "user", content: prompt }
       ]
     });
 
-    const raw = completion.choices[0].message.content;
+    const aiText = completion.choices[0].message.content.trim();
 
-    const parsed = JSON.parse(raw);
+    let parsed;
+    try {
+      parsed = JSON.parse(aiText);
+    } catch (e) {
+      console.log("AI returned invalid JSON:", aiText);
+      return res.status(500).json({ error: "AI returned invalid JSON", raw: aiText });
+    }
 
     res.json({ success: true, captions: parsed });
+
   } catch (err) {
-    console.error("AI ERROR:", err);
-    res.status(500).json({ error: "AI returned invalid JSON" });
+    console.error("SERVER ERROR:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
